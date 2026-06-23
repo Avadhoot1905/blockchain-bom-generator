@@ -33,12 +33,15 @@ func (b *Builder) Build(files []*parser.ParsedFile) *Graph {
 				ID:   c.Name,
 				Type: c.Kind,
 				Metadata: map[string]any{
-					"SourceFile": c.SourceFile,
-					"Inherits":   c.Inherits,
-					"Imports":    allImports,
-					"Functions":  functionNames(c.Functions),
-					"Events":     c.Events,
-					"Modifiers":  c.Modifiers,
+					"SourceFile":      c.SourceFile,
+					"Inherits":        c.Inherits,
+					"Imports":         allImports,
+					"Functions":       functionNames(c.Functions),
+					"Events":          c.Events,
+					"Modifiers":       c.Modifiers,
+					"License":         pf.License,
+					"SolidityVersion": pf.SolidityVersion,
+					"SourceHash":      pf.SourceHash,
 				},
 			}
 			g.UpsertNode(node)

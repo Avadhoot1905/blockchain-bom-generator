@@ -8,6 +8,9 @@ package solidity
 
 import (
 	"bufio"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"regexp"
 	"strings"
@@ -17,6 +20,10 @@ import (
 
 // Compile all regular expressions once at package init for performance.
 var (
+	// File-level metadata: SPDX license identifier and Solidity compiler pragma.
+	reSPDX   = regexp.MustCompile(`//\s*SPDX-License-Identifier:\s*(\S+)`)
+	rePragma = regexp.MustCompile(`^\s*pragma\s+solidity\s+([^;]+);`)
+
 	// Import patterns (double-quoted, single-quoted, and 'from' variants).
 	reImportDouble = regexp.MustCompile(`^\s*import\s+"([^"]+)"`)
 	reImportSingle = regexp.MustCompile(`^\s*import\s+'([^']+)'`)
@@ -55,13 +62,17 @@ func (p *SolidityParser) Language() string { return "solidity" }
 
 // Parse reads a Solidity file and returns its extracted declarations.
 func (p *SolidityParser) Parse(path string) (*parser.ParsedFile, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 
-	pf := &parser.ParsedFile{Path: path, Language: "solidity"}
+	sum := sha256.Sum256(data)
+	pf := &parser.ParsedFile{
+		Path:       path,
+		Language:   "solidity",
+		SourceHash: hex.EncodeToString(sum[:]),
+	}
 
 	var (
 		current       *parser.Contract
@@ -75,13 +86,29 @@ func (p *SolidityParser) Parse(path string) (*parser.ParsedFile, error) {
 		accumBuf     strings.Builder
 	)
 
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		raw := scanner.Text()
+
+		// SPDX and pragma must be checked on the raw line BEFORE comment stripping,
+		// because `// SPDX-License-Identifier: MIT` is entirely a comment and becomes
+		// empty after stripping, causing the `continue` below to skip it.
+		if pf.License == "" {
+			if m := reSPDX.FindStringSubmatch(raw); m != nil {
+				pf.License = strings.TrimSpace(m[1])
+			}
+		}
+
 		stripped, inBlockCmt = stripComments(raw, inBlockCmt)
 		trimmed := strings.TrimSpace(stripped)
 		if trimmed == "" {
 			continue
+		}
+
+		if pf.SolidityVersion == "" {
+			if m := rePragma.FindStringSubmatch(trimmed); m != nil {
+				pf.SolidityVersion = strings.TrimSpace(m[1])
+			}
 		}
 
 		// Handle multi-line contract declaration accumulation.

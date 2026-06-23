@@ -4,10 +4,13 @@ package parser
 // It is intentionally language-agnostic; parsers for Vyper, Rust, or Move
 // produce the same type, allowing the graph builder to be language-unaware.
 type ParsedFile struct {
-	Path        string
-	Language    string
-	FileImports []string   // imports declared at file scope (before any contract)
-	Contracts   []Contract
+	Path            string
+	Language        string
+	License         string // SPDX-License-Identifier value (e.g. "MIT", "Apache-2.0")
+	SolidityVersion string // pragma solidity constraint (e.g. "^0.8.20", ">=0.8.0 <0.9.0")
+	SourceHash      string // hex-encoded SHA-256 of the raw file bytes
+	FileImports     []string // imports declared at file scope (before any contract)
+	Contracts       []Contract
 }
 
 // Contract represents a single top-level declaration extracted from a source file.

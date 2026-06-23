@@ -118,6 +118,159 @@ func TestSanitizeBOMRef(t *testing.T) {
 	}
 }
 
+// ── SBOM foundation: license, hash, version, crypto properties ───────────────
+
+func makeEnrichedGraph() *graph.Graph {
+	g := graph.New()
+	g.UpsertNode(&graph.Node{
+		ID:   "PermitToken",
+		Type: "contract",
+		Metadata: map[string]any{
+			"License":          "MIT",
+			"SolidityVersion":  "^0.8.20",
+			"SourceHash":       "abc123def456abc123def456abc123def456abc123def456abc123def456abc12345",
+			"CryptoPrimitives": []string{"ECDSA", "EIP712"},
+			"CryptoCategories": []string{"DigitalSignature", "TypedDataSigning"},
+		},
+	})
+	g.UpsertNode(&graph.Node{
+		ID:   "@openzeppelin/contracts",
+		Type: "external",
+		Metadata: map[string]any{
+			"Version":     "^4.9.0",
+			"PackageName": "OpenZeppelin",
+		},
+	})
+	return g
+}
+
+func TestBOMComponentLicense(t *testing.T) {
+	b := NewBuilder()
+	bom, err := b.Build(makeEnrichedGraph())
+	if err != nil {
+		t.Fatal(err)
+	}
+	comp := findComponent(*bom.Components, "PermitToken")
+	if comp == nil {
+		t.Fatal("PermitToken not found")
+	}
+	if comp.Licenses == nil || len(*comp.Licenses) == 0 {
+		t.Fatal("expected Licenses to be set")
+	}
+	if (*comp.Licenses)[0].License == nil || (*comp.Licenses)[0].License.ID != "MIT" {
+		t.Errorf("expected SPDX license ID MIT, got %+v", (*comp.Licenses)[0])
+	}
+}
+
+func TestBOMComponentHash(t *testing.T) {
+	b := NewBuilder()
+	bom, _ := b.Build(makeEnrichedGraph())
+	comp := findComponent(*bom.Components, "PermitToken")
+	if comp == nil {
+		t.Fatal("PermitToken not found")
+	}
+	if comp.Hashes == nil || len(*comp.Hashes) == 0 {
+		t.Fatal("expected Hashes to be set")
+	}
+	h := (*comp.Hashes)[0]
+	if h.Algorithm != "SHA-256" {
+		t.Errorf("hash algorithm = %q, want SHA-256", h.Algorithm)
+	}
+	if h.Value == "" {
+		t.Error("hash value should not be empty")
+	}
+}
+
+func TestBOMComponentVersion_FromSolidityPragma(t *testing.T) {
+	b := NewBuilder()
+	bom, _ := b.Build(makeEnrichedGraph())
+	comp := findComponent(*bom.Components, "PermitToken")
+	if comp == nil {
+		t.Fatal("PermitToken not found")
+	}
+	if comp.Version != "^0.8.20" {
+		t.Errorf("Version = %q, want ^0.8.20", comp.Version)
+	}
+}
+
+func TestBOMComponentVersion_FromPackageJSON(t *testing.T) {
+	b := NewBuilder()
+	bom, _ := b.Build(makeEnrichedGraph())
+	comp := findComponent(*bom.Components, "@openzeppelin/contracts")
+	if comp == nil {
+		t.Fatal("@openzeppelin/contracts not found")
+	}
+	if comp.Version != "^4.9.0" {
+		t.Errorf("external package Version = %q, want ^4.9.0", comp.Version)
+	}
+}
+
+func TestBOMCryptoPrimitivesProperties(t *testing.T) {
+	b := NewBuilder()
+	bom, _ := b.Build(makeEnrichedGraph())
+	comp := findComponent(*bom.Components, "PermitToken")
+	if comp == nil || comp.Properties == nil {
+		t.Fatal("PermitToken or its properties not found")
+	}
+	props := *comp.Properties
+	if !hasProperty(props, "smartbom:CryptoPrimitives", "ECDSA") {
+		t.Error("expected smartbom:CryptoPrimitives=ECDSA")
+	}
+	if !hasProperty(props, "smartbom:CryptoPrimitives", "EIP712") {
+		t.Error("expected smartbom:CryptoPrimitives=EIP712")
+	}
+	if !hasProperty(props, "smartbom:CryptoCategories", "DigitalSignature") {
+		t.Error("expected smartbom:CryptoCategories=DigitalSignature")
+	}
+	if !hasProperty(props, "smartbom:CryptoCategories", "TypedDataSigning") {
+		t.Error("expected smartbom:CryptoCategories=TypedDataSigning")
+	}
+}
+
+func TestBOMSolidityVersionProperty(t *testing.T) {
+	b := NewBuilder()
+	bom, _ := b.Build(makeEnrichedGraph())
+	comp := findComponent(*bom.Components, "PermitToken")
+	if comp == nil || comp.Properties == nil {
+		t.Fatal("PermitToken or its properties not found")
+	}
+	if !hasProperty(*comp.Properties, "smartbom:SolidityVersion", "^0.8.20") {
+		t.Error("expected smartbom:SolidityVersion=^0.8.20 property")
+	}
+}
+
+func TestBOMLicenseProperty(t *testing.T) {
+	b := NewBuilder()
+	bom, _ := b.Build(makeEnrichedGraph())
+	comp := findComponent(*bom.Components, "PermitToken")
+	if comp == nil || comp.Properties == nil {
+		t.Fatal("PermitToken or its properties not found")
+	}
+	if !hasProperty(*comp.Properties, "smartbom:License", "MIT") {
+		t.Error("expected smartbom:License=MIT property")
+	}
+}
+
+func TestBOMBackwardCompatibility(t *testing.T) {
+	// Nodes without the new fields should still produce valid BOM output.
+	b := NewBuilder()
+	bom, err := b.Build(makeTestGraph())
+	if err != nil {
+		t.Fatalf("build error: %v", err)
+	}
+	if bom.Components == nil || len(*bom.Components) == 0 {
+		t.Error("expected components from legacy test graph")
+	}
+	// Existing properties must still be present.
+	comp := findComponent(*bom.Components, "MyToken")
+	if comp == nil {
+		t.Fatal("MyToken not found")
+	}
+	if !hasProperty(*comp.Properties, "smartbom:ContractType", "Token") {
+		t.Error("backward compat: expected smartbom:ContractType=Token")
+	}
+}
+
 func findComponent(components []cdx.Component, name string) *cdx.Component {
 	for i := range components {
 		if components[i].Name == name {

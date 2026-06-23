@@ -33,6 +33,7 @@ func (p *Pipeline) Run(g *graph.Graph) error {
 }
 
 // DefaultPipeline returns a Pipeline with all built-in analyzers.
+// CryptoAnalyzer runs last so other analyzers' labels are already set.
 func DefaultPipeline() *Pipeline {
 	return NewPipeline(
 		&TokenAnalyzer{},
@@ -40,5 +41,6 @@ func DefaultPipeline() *Pipeline {
 		&OracleAnalyzer{},
 		&GovernanceAnalyzer{},
 		&TreasuryAnalyzer{},
+		&CryptoAnalyzer{},
 	)
 }

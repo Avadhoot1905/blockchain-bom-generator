@@ -77,15 +77,37 @@ func buildComponents(g *graph.Graph) ([]cdx.Component, error) {
 	var components []cdx.Component
 
 	for id, node := range g.Nodes {
+		// Use explicit package version when available; fall back to Solidity pragma.
+		version := stringMeta(node, "Version")
+		if version == "" {
+			version = stringMeta(node, "SolidityVersion")
+		}
+
 		comp := cdx.Component{
 			BOMRef:  sanitizeBOMRef(id),
 			Name:    id,
 			Type:    nodeTypeToComponentType(node.Type),
-			Version: stringMeta(node, "Version"),
+			Version: version,
 		}
 
 		if src := stringMeta(node, "SourceFile"); src != "" {
 			comp.Description = "Source: " + src
+		}
+
+		// SPDX license.
+		if lic := stringMeta(node, "License"); lic != "" {
+			licenses := cdx.Licenses{
+				cdx.LicenseChoice{License: &cdx.License{ID: lic}},
+			}
+			comp.Licenses = &licenses
+		}
+
+		// Source integrity hash.
+		if h := stringMeta(node, "SourceHash"); h != "" {
+			hashes := []cdx.Hash{
+				{Algorithm: cdx.HashAlgoSHA256, Value: h},
+			}
+			comp.Hashes = &hashes
 		}
 
 		props := buildProperties(node)
@@ -135,11 +157,27 @@ func buildProperties(node *graph.Node) []cdx.Property {
 	add("smartbom:OracleProvider", stringMeta(node, "OracleProvider"))
 	add("smartbom:PackageName", stringMeta(node, "PackageName"))
 	add("smartbom:SourceFile", stringMeta(node, "SourceFile"))
+	add("smartbom:SolidityVersion", stringMeta(node, "SolidityVersion"))
+	add("smartbom:License", stringMeta(node, "License"))
 
 	// Inheritance list.
 	if inherits, ok := node.Metadata["Inherits"].([]string); ok && len(inherits) > 0 {
 		for _, base := range inherits {
 			props = append(props, cdx.Property{Name: "smartbom:Inherits", Value: base})
+		}
+	}
+
+	// CBOM: cryptographic primitives (e.g. ["ECDSA", "Keccak256"]).
+	if prims, ok := node.Metadata["CryptoPrimitives"].([]string); ok {
+		for _, p := range prims {
+			props = append(props, cdx.Property{Name: "smartbom:CryptoPrimitives", Value: p})
+		}
+	}
+
+	// CBOM: cryptographic categories (e.g. ["DigitalSignature", "HashFunction"]).
+	if cats, ok := node.Metadata["CryptoCategories"].([]string); ok {
+		for _, c := range cats {
+			props = append(props, cdx.Property{Name: "smartbom:CryptoCategories", Value: c})
 		}
 	}
 

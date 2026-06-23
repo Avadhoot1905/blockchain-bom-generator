@@ -14,6 +14,7 @@ import (
 	"github.com/smartbom/smartbom/internal/discovery"
 	"github.com/smartbom/smartbom/internal/git"
 	"github.com/smartbom/smartbom/internal/graph"
+	"github.com/smartbom/smartbom/internal/packages"
 	"github.com/smartbom/smartbom/internal/parser"
 	"github.com/smartbom/smartbom/internal/parser/solidity"
 	"github.com/smartbom/smartbom/internal/semantic"
@@ -106,6 +107,13 @@ func runScan(cmd *cobra.Command, _ []string) error {
 	nodes, edges := g.Stats()
 	fmt.Printf("Graph: %d nodes, %d edges\n", nodes, edges)
 
+	// ── 4b. Enrich external nodes with versions from package.json / foundry.toml ──
+	if len(project.ConfigFiles) > 0 {
+		slog.Info("extracting package metadata", "manifests", len(project.ConfigFiles))
+		pkgVersions := packages.ExtractVersions(project.ConfigFiles)
+		applyPackageVersions(g, pkgVersions)
+	}
+
 	// ── 5. Semantic analysis ───────────────────────────────────────────────────
 	slog.Info("running semantic analysis")
 	pipeline := semantic.DefaultPipeline()
@@ -190,6 +198,27 @@ func printDiscovery(p *discovery.Project) {
 	fmt.Printf("  Rust (Cargo)   : %d\n", len(p.RustFiles))
 	fmt.Printf("  Move           : %d\n", len(p.MoveFiles))
 	fmt.Printf("  Config files   : %d\n", len(p.ConfigFiles))
+}
+
+// applyPackageVersions sets the "Version" metadata key on external graph nodes
+// whose ID matches a key in the versions map extracted from package manifests.
+func applyPackageVersions(g *graph.Graph, versions map[string]string) {
+	for id, node := range g.Nodes {
+		if node.Type != "external" {
+			continue
+		}
+		if v, ok := versions[id]; ok {
+			node.Metadata["Version"] = v
+		}
+		// Also try matching by PackageName for foundry-style plain names.
+		if pkg, _ := node.Metadata["PackageName"].(string); pkg != "" {
+			if v, ok := versions[pkg]; ok {
+				if _, already := node.Metadata["Version"].(string); !already {
+					node.Metadata["Version"] = v
+				}
+			}
+		}
+	}
 }
 
 func printSemanticSummary(g *graph.Graph) {
